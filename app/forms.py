@@ -154,7 +154,118 @@ class CustomAuthenticationForm(AuthenticationForm):
         self.fields['password'].error_messages = {
             'required': 'Vui lòng nhập mật khẩu.',
         }
-    
+
     def confirm_login_allowed(self, user):
         if not user.is_active:
             raise ValidationError('Tài khoản này đã bị vô hiệu hóa.')
+
+# Checkout Form
+class CheckoutForm(forms.Form):
+    full_name = forms.CharField(
+        max_length=100,
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Họ và tên'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập họ và tên.',
+            'max_length': 'Họ và tên không được vượt quá 100 ký tự.'
+        }
+    )
+    phone = forms.CharField(
+        max_length=15,
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Số điện thoại'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập số điện thoại.',
+            'max_length': 'Số điện thoại không được vượt quá 15 ký tự.'
+        }
+    )
+    email = forms.EmailField(
+        required=True,
+        widget=forms.EmailInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Email'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập địa chỉ email.',
+            'invalid': 'Địa chỉ email không hợp lệ.'
+        }
+    )
+    address = forms.CharField(
+        max_length=255,
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Địa chỉ'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập địa chỉ.',
+            'max_length': 'Địa chỉ không được vượt quá 255 ký tự.'
+        }
+    )
+    city = forms.CharField(
+        max_length=50,
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Tỉnh/Thành phố'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập tỉnh/thành phố.',
+            'max_length': 'Tỉnh/thành phố không được vượt quá 50 ký tự.'
+        }
+    )
+    district = forms.CharField(
+        max_length=50,
+        required=True,
+        widget=forms.TextInput(attrs={
+            'class': 'form-control',
+            'placeholder': 'Quận/Huyện'
+        }),
+        error_messages={
+            'required': 'Vui lòng nhập quận/huyện.',
+            'max_length': 'Quận/huyện không được vượt quá 50 ký tự.'
+        }
+    )
+    payment_method = forms.ChoiceField(
+        choices=[
+            ('cod', 'Thanh toán khi nhận hàng'),
+            ('bank', 'Chuyển khoản ngân hàng'),
+        ],
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'form-control'
+        }),
+        error_messages={
+            'required': 'Vui lòng chọn phương thức thanh toán.',
+            'invalid_choice': 'Phương thức thanh toán không hợp lệ.'
+        }
+    )
+    notes = forms.CharField(
+        max_length=500,
+        required=False,
+        widget=forms.Textarea(attrs={
+            'class': 'form-control',
+            'placeholder': 'Ghi chú (tùy chọn)',
+            'rows': 3
+        }),
+        error_messages={
+            'max_length': 'Ghi chú không được vượt quá 500 ký tự.'
+        }
+    )
+
+    def clean_phone(self):
+        phone = self.cleaned_data.get('phone')
+        if phone:
+            # Loại bỏ khoảng trắng và ký tự đặc biệt
+            phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+            if not phone.isdigit():
+                raise ValidationError('Số điện thoại chỉ được chứa số.')
+            if len(phone) < 10:
+                raise ValidationError('Số điện thoại phải có ít nhất 10 chữ số.')
+        return phone

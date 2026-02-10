@@ -2,7 +2,8 @@ from django.contrib.auth.forms import UserCreationForm
 from django.shortcuts import render, redirect
 from django.contrib.auth import login
 from django.contrib import messages
-from .forms import CustomUserCreationForm, ProductForm
+from .forms import CustomUserCreationForm, ProductForm, CheckoutForm
+from django.db import transaction
 from django.http import HttpResponse
 from .models import Product, Category
 from django.http import JsonResponse
@@ -260,18 +261,109 @@ def cart_view(request):
 
 
 
+@login_required
+def order_success(request, order_id):
+    order = get_object_or_404(Order.objects.select_related('user'), id=order_id, user=request.user)
+    order_items = OrderItem.objects.filter(order=order).select_related('product_variant__product')
+    return render(request, 'checkout/order_success.html', {
+        'order': order,
+        'order_items': order_items,
+    })
+
+@login_required
 def checkout_view(request):
-    # Giỏ hàng mẫu: lấy 2 sản phẩm đầu tiên từ database (nếu có)
-    products = list(Product.objects.all()[:2])
+    cart = request.session.get("cart", {})
+    if not cart:
+        messages.warning(request, 'Giỏ hàng của bạn đang trống. Vui lòng thêm sản phẩm trước khi thanh toán.')
+        return redirect('shop:cart')
+
+    # Tính toán giỏ hàng
     items = []
-    if len(products) > 0:
-        items.append({'id': products[0].id, 'name': products[0].name, 'price': products[0].price, 'qty': 1, 'total': products[0].price})
-    if len(products) > 1:
-        items.append({'id': products[1].id, 'name': products[1].name, 'price': products[1].price, 'qty': 1, 'total': products[1].price})
-    subtotal = sum(i['total'] for i in items)
+    subtotal = 0
+    for key, item in cart.items():
+        total = item["price"] * item["quantity"]
+        subtotal += total
+        items.append({
+            **item,
+            "total": total
+        })
     shipping = 30000 if subtotal < 5000000 else 0
     total = subtotal + shipping
+
+    if request.method == 'POST':
+        form = CheckoutForm(request.POST)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    # Tạo đơn hàng
+                    order = Order.objects.create(
+                        user=request.user,
+                        full_name=form.cleaned_data['full_name'],
+                        phone=form.cleaned_data['phone'],
+                        email=form.cleaned_data['email'],
+                        address=form.cleaned_data['address'],
+                        city=form.cleaned_data['city'],
+                        district=form.cleaned_data['district'],
+                        payment_method=form.cleaned_data['payment_method'],
+                        notes=form.cleaned_data.get('notes', ''),
+                        total_amount=total,
+                        shipping_fee=shipping,
+                        status='pending'
+                    )
+
+                    # Tạo chi tiết đơn hàng
+                    for key, item in cart.items():
+                        # Tách key để lấy product_id, capacity_id, color_id
+                        parts = key.split('-')
+                        if len(parts) == 3:
+                            product_id, capacity_id, color_id = parts
+                            try:
+                                variant = ProductVariant.objects.get(
+                                    product_id=product_id,
+                                    capacity_id=capacity_id,
+                                    color_id=color_id
+                                )
+                                OrderItem.objects.create(
+                                    order=order,
+                                    product_variant=variant,
+                                    quantity=item['quantity'],
+                                    price=item['price']
+                                )
+                            except ProductVariant.DoesNotExist:
+                                # Nếu không tìm thấy variant, bỏ qua hoặc xử lý lỗi
+                                pass
+
+                    # Xóa giỏ hàng sau khi đặt hàng thành công
+                    request.session['cart'] = {}
+                    request.session.modified = True
+
+                    # Gửi thông báo thành công
+                    messages.success(request, f'Đặt hàng thành công! Mã đơn hàng của bạn là #{order.id}. Chúng tôi sẽ liên hệ với bạn sớm nhất có thể.')
+
+                    # Chuyển hướng đến trang xác nhận đơn hàng
+                    return redirect('shop:order_success', order_id=order.id)
+
+            except Exception as e:
+                messages.error(request, f'Có lỗi xảy ra khi đặt hàng: {str(e)}')
+        else:
+            # Hiển thị lỗi validation
+            for field, errors in form.errors.items():
+                for error in errors:
+                    messages.error(request, error)
+    else:
+        # Pre-fill form với thông tin user nếu có
+        initial_data = {}
+        if request.user.first_name:
+            initial_data['full_name'] = request.user.first_name
+        if hasattr(request.user, 'phone') and request.user.phone:
+            initial_data['phone'] = request.user.phone
+        if request.user.email:
+            initial_data['email'] = request.user.email
+
+        form = CheckoutForm(initial=initial_data)
+
     return render(request, 'checkout/checkout.html', {
+        'form': form,
         'items': items,
         'subtotal': subtotal,
         'shipping': shipping,
